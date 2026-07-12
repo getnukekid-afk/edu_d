@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 
 export async function signUp(formData: FormData) {
   const supabase = await createClient();
@@ -11,6 +12,10 @@ export async function signUp(formData: FormData) {
   const fullName = formData.get('full_name') as string;
   const classGrade = formData.get('class_grade') as string;
   const dateOfBirth = formData.get('date_of_birth') as string;
+
+  // Get the origin from the request headers (window not available in server actions)
+  const headersList = await headers();
+  const origin = headersList.get('origin') || 'http://localhost:3000';
 
   const { error } = await supabase.auth.signUp({
     email,
@@ -22,7 +27,7 @@ export async function signUp(formData: FormData) {
         date_of_birth: dateOfBirth,
         role: 'student',
       },
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_SUPABASE_URL ? '' : ''}${typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/auth/callback`,
+      emailRedirectTo: `${origin}/auth/callback`,
     },
   });
 

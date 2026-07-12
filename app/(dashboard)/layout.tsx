@@ -17,42 +17,99 @@ export default function DashboardLayout({
     class_grade: string;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     async function loadUser() {
-      const supabase = createClient();
-      const { data: { user: authUser } } = await supabase.auth.getUser();
+      try {
+        const supabase = createClient();
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
-      if (!authUser) {
-        router.push('/login');
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name, role, class_grade')
-        .eq('id', authUser.id)
-        .single();
-
-      if (profile) {
-        setUser(profile);
-
-        // Redirect admin to admin dashboard if on student dashboard
-        if (profile.role === 'admin' && window.location.pathname === '/dashboard') {
-          router.push('/admin');
+        if (authError || !authUser) {
+          router.push('/login');
+          return;
         }
+
+        // Try to fetch profile from database
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, role, class_grade')
+          .eq('id', authUser.id)
+          .single();
+
+        if (profile) {
+          setUser(profile);
+
+          // Redirect admin to admin dashboard if on student dashboard
+          if (profile.role === 'admin' && window.location.pathname === '/dashboard') {
+            router.push('/admin');
+          }
+        } else {
+          // Profile not found — likely migration not run or trigger didn't fire
+          // Try to create the profile from auth metadata
+          const meta = authUser.user_metadata || {};
+          const fallbackProfile = {
+            full_name: meta.full_name || authUser.email || 'User',
+            role: meta.role || 'student',
+            class_grade: meta.class_grade || '',
+          };
+
+          // Attempt to insert the profile
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .upsert({
+              id: authUser.id,
+              full_name: fallbackProfile.full_name,
+              role: fallbackProfile.role,
+              class_grade: fallbackProfile.class_grade,
+              date_of_birth: meta.date_of_birth || null,
+            });
+
+          if (insertError) {
+            console.error('Could not create profile:', insertError.message);
+            console.warn('Using fallback profile from auth metadata');
+          }
+
+          setUser(fallbackProfile);
+        }
+      } catch (err) {
+        console.error('Dashboard load error:', err);
+        setError('Không thể tải dữ liệu. Vui lòng thử lại.');
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     loadUser();
   }, [router]);
 
-  if (loading || !user) {
+  if (loading) {
     return (
       <div className="loading-overlay" style={{ minHeight: '100vh' }}>
         <div className="spinner spinner-lg"></div>
         <span>Đang tải...</span>
+      </div>
+    );
+  }
+
+  if (error || !user) {
+    return (
+      <div className="loading-overlay" style={{ minHeight: '100vh' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-4)' }}>⚠️</div>
+          <h2 style={{ marginBottom: 'var(--space-2)' }}>Có lỗi xảy ra</h2>
+          <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-4)', maxWidth: 400 }}>
+            {error || 'Không tìm thấy hồ sơ. Hãy chắc chắn đã chạy migration SQL trong Supabase.'}
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button className="btn btn-primary" onClick={() => window.location.reload()}>
+              🔄 Thử lại
+            </button>
+            <button className="btn btn-secondary" onClick={() => router.push('/login')}>
+              Đăng nhập lại
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
