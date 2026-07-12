@@ -3,6 +3,15 @@
 -- Run this in your Supabase SQL Editor
 -- ============================================================
 
+-- 0. Helper function to check admin role (SECURITY DEFINER avoids RLS recursion)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
 -- 1. Create profiles table (extends auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -44,72 +53,57 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.submissions ENABLE ROW LEVEL SECURITY;
 
--- 5. RLS Policies for profiles
-CREATE POLICY "Users can view their own profile"
+-- 5. RLS Policies for profiles (using is_admin() to avoid recursion)
+CREATE POLICY "profiles_select_own"
   ON public.profiles FOR SELECT
   USING (auth.uid() = id);
 
-CREATE POLICY "Admins can view all profiles"
+CREATE POLICY "profiles_select_admin"
   ON public.profiles FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
+  USING (public.is_admin());
 
-CREATE POLICY "Users can update their own profile"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
-CREATE POLICY "Users can insert their own profile"
+CREATE POLICY "profiles_insert_own"
   ON public.profiles FOR INSERT
   WITH CHECK (auth.uid() = id);
 
+CREATE POLICY "profiles_update_own"
+  ON public.profiles FOR UPDATE
+  USING (auth.uid() = id);
+
 -- 6. RLS Policies for assignments
-CREATE POLICY "Anyone authenticated can view assignments"
+CREATE POLICY "assignments_select_authenticated"
   ON public.assignments FOR SELECT
   USING (auth.uid() IS NOT NULL);
 
-CREATE POLICY "Admins can create assignments"
+CREATE POLICY "assignments_insert_admin"
   ON public.assignments FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
+  WITH CHECK (public.is_admin());
 
-CREATE POLICY "Admins can update their own assignments"
+CREATE POLICY "assignments_update_own"
   ON public.assignments FOR UPDATE
   USING (created_by = auth.uid());
 
-CREATE POLICY "Admins can delete their own assignments"
+CREATE POLICY "assignments_delete_own"
   ON public.assignments FOR DELETE
   USING (created_by = auth.uid());
 
 -- 7. RLS Policies for submissions
-CREATE POLICY "Students can view their own submissions"
+CREATE POLICY "submissions_select_own"
   ON public.submissions FOR SELECT
   USING (student_id = auth.uid());
 
-CREATE POLICY "Admins can view all submissions"
+CREATE POLICY "submissions_select_admin"
   ON public.submissions FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
+  USING (public.is_admin());
 
-CREATE POLICY "Students can create submissions"
+CREATE POLICY "submissions_insert_student"
   ON public.submissions FOR INSERT
   WITH CHECK (student_id = auth.uid());
 
-CREATE POLICY "System can update submissions (for grading)"
+CREATE POLICY "submissions_update"
   ON public.submissions FOR UPDATE
   USING (
-    student_id = auth.uid() OR
-    EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
-    )
+    student_id = auth.uid() OR public.is_admin()
   );
 
 -- 8. Auto-create profile on signup trigger
@@ -161,10 +155,7 @@ CREATE POLICY "Anyone can view submissions"
 CREATE POLICY "Admins can upload answer keys"
   ON storage.objects FOR INSERT
   WITH CHECK (
-    bucket_id = 'answer-keys' AND
-    EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
-    )
+    bucket_id = 'answer-keys' AND public.is_admin()
   );
 
 CREATE POLICY "Anyone authenticated can view answer keys"
