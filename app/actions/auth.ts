@@ -13,9 +13,10 @@ export async function signUp(formData: FormData) {
   const classGrade = formData.get('class_grade') as string;
   const dateOfBirth = formData.get('date_of_birth') as string;
 
-  // Get the origin from the request headers (window not available in server actions)
-  const headersList = await headers();
-  const origin = headersList.get('origin') || 'http://localhost:3000';
+  // Get the site URL (Render.com provides RENDER_EXTERNAL_URL automatically)
+  let siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.RENDER_EXTERNAL_URL ?? 'http://localhost:3000';
+  // Remove trailing slash if present
+  siteUrl = siteUrl.replace(/\/$/, '');
 
   const { error } = await supabase.auth.signUp({
     email,
@@ -27,7 +28,7 @@ export async function signUp(formData: FormData) {
         date_of_birth: dateOfBirth,
         role: 'student',
       },
-      emailRedirectTo: `${origin}/auth/callback`,
+      emailRedirectTo: `${siteUrl}/auth/callback`,
     },
   });
 
